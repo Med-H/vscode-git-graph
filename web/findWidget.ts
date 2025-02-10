@@ -224,7 +224,10 @@ class FindWidget {
 			} catch (e) {
 				findPattern = null;
 				findGlobalPattern = null;
-				this.widgetElem.setAttribute(ATTR_ERROR, e.message);
+				const errorMessage = e instanceof Error
+					? e.message
+					: 'Invalid regular expression';
+				this.widgetElem.setAttribute(ATTR_ERROR, errorMessage);
 			}
 			if (findPattern !== null && findGlobalPattern !== null) {
 				let commitElems = getCommitElems(), j = 0, commit, zeroLengthMatch = false;

@@ -420,19 +420,24 @@ export class DataSource extends Disposable {
 	 * @param toHash The commit hash the comparison is to.
 	 * @returns The comparison details.
 	 */
-	public getCommitComparison(repo: string, fromHash: string, toHash: string): Promise<GitCommitComparisonData> {
-		return Promise.all<DiffNameStatusRecord[], DiffNumStatRecord[], GitStatusFiles | null>([
-			this.getDiffNameStatus(repo, fromHash, toHash === UNCOMMITTED ? '' : toHash),
-			this.getDiffNumStat(repo, fromHash, toHash === UNCOMMITTED ? '' : toHash),
-			toHash === UNCOMMITTED ? this.getStatus(repo) : Promise.resolve(null)
-		]).then((results) => {
+	public async getCommitComparison(repo: string, fromHash: string, toHash: string): Promise<GitCommitComparisonData> {
+		try {
+			const [nameStatus, numStat, status] = await Promise.all([
+				this.getDiffNameStatus(repo, fromHash, toHash === UNCOMMITTED ? '' : toHash),
+				this.getDiffNumStat(repo, fromHash, toHash === UNCOMMITTED ? '' : toHash),
+				toHash === UNCOMMITTED ? this.getStatus(repo) : Promise.resolve(null)
+			]);
+
 			return {
-				fileChanges: generateFileChanges(results[0], results[1], results[2]),
+				fileChanges: generateFileChanges(nameStatus, numStat, status),
 				error: null
 			};
-		}).catch((errorMessage) => {
-			return { fileChanges: [], error: errorMessage };
-		});
+		} catch (errorMessage) {
+			return {
+				fileChanges: [],
+				error: errorMessage as ErrorInfo
+			};
+		}
 	}
 
 	/**

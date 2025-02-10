@@ -234,23 +234,38 @@ export class GitGraphView extends Disposable {
 					error: await this.dataSource.cleanUntrackedFiles(msg.repo, msg.directories)
 				});
 				break;
-			case 'commitDetails':
-				let data = await Promise.all<GitCommitDetailsData, string | null>([
-					msg.commitHash === UNCOMMITTED
-						? this.dataSource.getUncommittedDetails(msg.repo)
-						: msg.stash === null
-							? this.dataSource.getCommitDetails(msg.repo, msg.commitHash, msg.hasParents)
-							: this.dataSource.getStashDetails(msg.repo, msg.commitHash, msg.stash),
-					msg.avatarEmail !== null ? this.avatarManager.getAvatarImage(msg.avatarEmail) : Promise.resolve(null)
-				]);
+			case 'commitDetails': {
+				type CommitDetailsResult = [GitCommitDetailsData, string | null];
+
+				// Define the promise for commit details
+				const commitDetailsPromise: Promise<GitCommitDetailsData> = msg.commitHash === UNCOMMITTED
+					? this.dataSource.getUncommittedDetails(msg.repo)
+					: msg.stash === null
+						? this.dataSource.getCommitDetails(msg.repo, msg.commitHash, msg.hasParents)
+						: this.dataSource.getStashDetails(msg.repo, msg.commitHash, msg.stash);
+
+				// Define the promise for avatar
+				const avatarPromise: Promise<string | null> = msg.avatarEmail !== null
+					? this.avatarManager.getAvatarImage(msg.avatarEmail)
+					: Promise.resolve(null);
+
+				// Combine promises with proper typing
+				const [commitDetails, avatar] = await Promise.all([
+					commitDetailsPromise,
+					avatarPromise
+				]) as CommitDetailsResult;
+
 				this.sendMessage({
 					command: 'commitDetails',
-					...data[0],
-					avatar: data[1],
-					codeReview: msg.commitHash !== UNCOMMITTED ? this.extensionState.getCodeReview(msg.repo, msg.commitHash) : null,
+					...commitDetails,
+					avatar,
+					codeReview: msg.commitHash !== UNCOMMITTED
+						? this.extensionState.getCodeReview(msg.repo, msg.commitHash)
+						: null,
 					refresh: msg.refresh
 				});
 				break;
+			}
 			case 'compareCommits':
 				this.sendMessage({
 					command: 'compareCommits',

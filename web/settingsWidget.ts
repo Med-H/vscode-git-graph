@@ -603,7 +603,10 @@ class SettingsWidget {
 					regExpParseError = null;
 				}
 			} catch (e) {
-				regExpParseError = e.message;
+				const errorMessage = e instanceof Error
+					? e.message
+					: 'Invalid regular expression';
+				regExpParseError = errorMessage;
 			}
 			if (regExpParseError !== null) {
 				dialog.showError('Invalid Issue Regex', regExpParseError, 'Go Back', () => {
