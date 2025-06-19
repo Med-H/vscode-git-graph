@@ -32,6 +32,7 @@ class GitGraphView {
 
 	private moreCommitsAvailable: boolean = false;
 	private expandedCommit: ExpandedCommit | null = null;
+	private selectedCommits: Set<string> = new Set();
 	private maxCommits: number;
 	private scrollTop = 0;
 	private renderedGitBranchHead: string | null = null;
@@ -774,6 +775,80 @@ class GitGraphView {
 		}
 	}
 
+	/* Multi-select Commit Management */
+
+	private toggleCommitSelection(commitHash: string, commitElem: HTMLElement) {
+		if (this.selectedCommits.has(commitHash)) {
+			this.selectedCommits.delete(commitHash);
+			commitElem.classList.remove('commitSelected');
+		} else {
+			this.selectedCommits.add(commitHash);
+			commitElem.classList.add('commitSelected');
+		}
+	}
+
+	private clearCommitSelection() {
+		const selectedElems = document.querySelectorAll('.commitSelected');
+		selectedElems.forEach(elem => elem.classList.remove('commitSelected'));
+		this.selectedCommits.clear();
+	}
+
+	private getSelectedCommitsArray(): string[] {
+		return Array.from(this.selectedCommits).sort((a, b) => {
+			const indexA = this.commitLookup[a];
+			const indexB = this.commitLookup[b];
+			return indexA - indexB;
+		});
+	}
+
+	private areSelectedCommitsContiguous(): boolean {
+		if (this.selectedCommits.size < 2) return true;
+
+		const sortedCommits = this.getSelectedCommitsArray();
+		for (let i = 0; i < sortedCommits.length - 1; i++) {
+			const currentIndex = this.commitLookup[sortedCommits[i]];
+			const nextIndex = this.commitLookup[sortedCommits[i + 1]];
+			if (nextIndex - currentIndex !== 1) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private squashCommitsAction(target: DialogTarget & CommitTarget) {
+		const selectedCommits = this.getSelectedCommitsArray();
+		if (selectedCommits.length < 2) return;
+
+		const oldestCommit = selectedCommits[selectedCommits.length - 1];
+		const newestCommit = selectedCommits[0];
+		const oldestCommitData = this.commits[this.commitLookup[oldestCommit]];
+		const newestCommitData = this.commits[this.commitLookup[newestCommit]];
+
+		dialog.showForm(
+			`Are you sure you want to squash ${selectedCommits.length} commits into one?<br><br>` +
+			`<b>Oldest:</b> ${abbrevCommit(oldestCommit)} - ${escapeHtml(oldestCommitData.message)}<br>` +
+			`<b>Newest:</b> ${abbrevCommit(newestCommit)} - ${escapeHtml(newestCommitData.message)}`,
+			[{
+				type: DialogInputType.Text,
+				name: 'Commit Message',
+				default: newestCommitData.message,
+				placeholder: 'Enter the commit message for the squashed commit'
+			}],
+			'Yes, squash commits',
+			(values) => {
+				const commitMessage = <string>values[0];
+				runAction({
+					command: 'squashCommits',
+					repo: this.currentRepo,
+					commits: selectedCommits,
+					commitMessage: commitMessage
+				}, 'Squashing Commits');
+				this.clearCommitSelection();
+			},
+			target
+		);
+	}
+
 
 	/* Renderers */
 
@@ -1099,7 +1174,18 @@ class GitGraphView {
 	private getCommitContextMenuActions(target: DialogTarget & CommitTarget): ContextMenuActions {
 		const hash = target.hash, visibility = this.config.contextMenuActionsVisibility.commit;
 		const commit = this.commits[this.commitLookup[hash]];
-		return [[
+		let actions: ContextMenuActions = [];
+
+		// Multi-select squash option
+		if (this.selectedCommits.size > 1 && this.selectedCommits.has(hash) && this.areSelectedCommitsContiguous()) {
+			actions = [...actions, [{
+				title: 'Squash Selected Commits' + ELLIPSIS,
+				visible: true,
+				onClick: () => this.squashCommitsAction(target)
+			}]];
+		}
+
+		return [...actions, [
 			{
 				title: 'Add Tag' + ELLIPSIS,
 				visible: visibility.addTag,
@@ -2216,22 +2302,31 @@ class GitGraphView {
 
 			} else if ((eventElem = eventTarget.closest('.commit')) !== null) {
 				// .commit was clicked
-				if (this.expandedCommit !== null) {
-					const commit = this.getCommitOfElem(eventElem);
-					if (commit === null) return;
+				const commit = this.getCommitOfElem(eventElem);
+				if (commit === null) return;
 
+				const mouseEvent = <MouseEvent>e;
+
+				if (mouseEvent.shiftKey) {
+					// Shift+click: toggle commit selection for multi-select
+					this.toggleCommitSelection(commit.hash, eventElem);
+				} else if (this.expandedCommit !== null) {
 					if (this.expandedCommit.commitHash === commit.hash) {
 						this.closeCommitDetails(true);
-					} else if ((<MouseEvent>e).ctrlKey || (<MouseEvent>e).metaKey) {
+					} else if (mouseEvent.ctrlKey || mouseEvent.metaKey) {
 						if (this.expandedCommit.compareWithHash === commit.hash) {
 							this.closeCommitComparison(true);
 						} else if (this.expandedCommit.commitElem !== null) {
 							this.loadCommitComparison(this.expandedCommit.commitElem, eventElem);
 						}
 					} else {
+						// Clear selection when clicking normally
+						this.clearCommitSelection();
 						this.loadCommitDetails(eventElem);
 					}
 				} else {
+					// Clear selection when clicking normally
+					this.clearCommitSelection();
 					this.loadCommitDetails(eventElem);
 				}
 			}
@@ -3374,6 +3469,9 @@ window.addEventListener('load', () => {
 				break;
 			case 'revertCommit':
 				refreshOrDisplayError(msg.error, 'Unable to Revert Commit');
+				break;
+			case 'squashCommits':
+				refreshOrDisplayError(msg.error, 'Unable to Squash Commits');
 				break;
 			case 'setGlobalViewState':
 				finishOrDisplayError(msg.error, 'Unable to save the Global View State');
